@@ -1,261 +1,231 @@
 #!/bin/bash
 
 # ============================================================
-# UBUNTU SERVER AUTOMATION SCRIPT
-# Features: Interactive Checklist, Idempotency Check, Dynamic Swap
-# Language: English
+# MODERN VPS SETUP (Powered by Charm.sh 'gum')
 # ============================================================
 
-# 1. Ensure the script is run as root
+# 1. Pastikan Root
 if [[ $EUID -ne 0 ]]; then
-   echo "ERROR: This script must be run as root (sudo)." 
+   echo "❌ Script ini harus dijalankan sebagai root (sudo)." 
    exit 1
 fi
 
-# 2. Check for 'whiptail' dependency
-if ! command -v whiptail &> /dev/null; then
-    echo "Whiptail is not installed. Installing..."
-    apt-get update && apt-get install whiptail -y
+# 2. Auto-Install GUM (UI Tool)
+if ! command -v gum &> /dev/null; then
+    echo "Installing Gum for modern UI..."
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | tee /etc/apt/sources.list.d/charm.list
+    apt-get update && apt-get install gum -y
 fi
+
+# --- CONFIG & HELPERS ---
 
 LOG_FILE="/var/log/vps_setup.log"
 
-# --- UTILITY FUNCTIONS ---
 log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
 }
 
-# --- STATUS CHECK FUNCTIONS (INITIAL DETECTION) ---
-
-check_update() {
-    # Check last update timestamp (less than 24 hours is considered ON)
-    if [ -f /var/lib/apt/periodic/update-success-stamp ]; then
-        if find /var/lib/apt/periodic/update-success-stamp -mtime -1 | grep -q .; then
-            echo "ON"; return
-        fi
-    fi
-    echo "OFF"
+# Fungsi Style Text
+style_header() {
+    gum style --foreground 212 --border-foreground 212 --border double --align center --width 50 --margin "1 2" --padding "2 4" "$1"
 }
 
-check_user() {
-    # Check if a regular user (UID >= 1000) exists
-    if awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd | grep -q .; then
-        echo "ON"
+style_success() {
+    gum style --foreground 82 "✅ $1"
+}
+
+style_error() {
+    gum style --foreground 196 "❌ $1"
+}
+
+# --- CHECK FUNCTIONS (Return formatted strings) ---
+
+get_status() {
+    # $1 = Nama Task, $2 = Function Check
+    if $2; then
+        echo "✅ $1 (Sudah Config)"
     else
-        echo "OFF"
+        echo "⬜ $1 (Belum Config)"
     fi
 }
 
-check_ssh() {
-    # Check if PasswordAuthentication is set to NO
-    if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config; then
-        echo "ON"
-    else
-        echo "OFF"
-    fi
+check_is_updated() {
+    [ -f /var/lib/apt/periodic/update-success-stamp ] && find /var/lib/apt/periodic/update-success-stamp -mtime -1 | grep -q .
 }
 
-check_firewall() {
-    # Check UFW status
-    if ufw status | grep -q "Status: active"; then
-        echo "ON"
-    else
-        echo "OFF"
-    fi
+check_is_user_exist() {
+    awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd | grep -q .
 }
 
-check_fail2ban() {
-    # Check fail2ban service status
-    if systemctl is-active --quiet fail2ban; then
-        echo "ON"
-    else
-        echo "OFF"
-    fi
+check_is_ssh_hardened() {
+    grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config
 }
 
-check_timezone() {
-    # Check if timezone is Asia/Jakarta
-    if timedatectl | grep -q "Asia/Jakarta"; then
-        echo "ON"
-    else
-        echo "OFF"
-    fi
+check_is_firewall_active() {
+    ufw status | grep -q "Status: active"
 }
 
-check_swap() {
-    # Check if any swap file/partition is active
-    if swapon --show --noheadings | grep -q "."; then
-        echo "ON"
-    else
-        echo "OFF"
-    fi
+check_is_fail2ban_active() {
+    systemctl is-active --quiet fail2ban
 }
 
-# --- MAIN EXECUTION FUNCTIONS ---
-
-run_update() {
-    log "START: System Update & Upgrade"
-    apt-get update && apt-get upgrade -y
-    apt-get autoremove -y
-    # Create manual stamp if system doesn't create one
-    touch /var/lib/apt/periodic/update-success-stamp
-    log "END: System Update Completed."
-    whiptail --msgbox "System Update Completed." 8 45
+check_is_timezone_set() {
+    timedatectl | grep -q "Asia/Jakarta"
 }
 
-run_user() {
-    NEW_USER=$(whiptail --inputbox "Enter New Username (NOT root):" 8 45 --title "Create User" 3>&1 1>&2 2>&3)
+check_is_swap_exist() {
+    swapon --show --noheadings | grep -q "."
+}
+
+# --- ACTION FUNCTIONS ---
+
+task_update() {
+    gum spin --spinner dot --title "Updating & Upgrading System..." -- \
+    bash -c "apt-get update && apt-get upgrade -y && apt-get autoremove -y && touch /var/lib/apt/periodic/update-success-stamp"
+    style_success "System Updated."
+    log "System Update Selesai"
+}
+
+task_user() {
+    echo ""
+    gum style --foreground 99 " SETUP USER BARU "
+    USERNAME=$(gum input --placeholder "Masukkan Username Baru (bukan root)")
     
-    if [ -z "$NEW_USER" ]; then return; fi
+    if [ -z "$USERNAME" ]; then style_error "Username kosong, skip."; return; fi
     
-    if id "$NEW_USER" &>/dev/null; then
-        whiptail --msgbox "User $NEW_USER already exists!" 8 45
+    if id "$USERNAME" &>/dev/null; then
+        style_error "User $USERNAME sudah ada."
     else
-        adduser --gecos "" "$NEW_USER"
-        usermod -aG sudo "$NEW_USER"
+        adduser --gecos "" "$USERNAME"
+        usermod -aG sudo "$USERNAME"
         
-        # Setup SSH Directory
-        mkdir -p /home/$NEW_USER/.ssh
-        chmod 700 /home/$NEW_USER/.ssh
+        # SSH Key Input (Multiline)
+        echo ""
+        gum style --foreground 212 "Masukkan SSH Public Key (Paste lalu tekan Ctrl+D):"
+        PUB_KEY=$(gum write --placeholder "ssh-rsa AAAA...")
         
-        # Input SSH Key
-        PUB_KEY=$(whiptail --inputbox "Enter SSH Public Key (Paste here):" 15 70 --title "SSH Key Setup" 3>&1 1>&2 2>&3)
         if [ ! -z "$PUB_KEY" ]; then
-            echo "$PUB_KEY" >> /home/$NEW_USER/.ssh/authorized_keys
-            chmod 600 /home/$NEW_USER/.ssh/authorized_keys
-            chown -R $NEW_USER:$NEW_USER /home/$NEW_USER/.ssh
-            log "SSH Key added to user $NEW_USER"
+            mkdir -p /home/$USERNAME/.ssh
+            echo "$PUB_KEY" >> /home/$USERNAME/.ssh/authorized_keys
+            chmod 700 /home/$USERNAME/.ssh
+            chmod 600 /home/$USERNAME/.ssh/authorized_keys
+            chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh
+            style_success "SSH Key ditambahkan."
         fi
-        
-        log "User $NEW_USER created."
-        whiptail --msgbox "User $NEW_USER successfully created." 8 45
+        style_success "User $USERNAME berhasil dibuat."
+        log "User $USERNAME created"
     fi
 }
 
-run_ssh_harden() {
-    log "START: SSH Hardening"
+task_ssh() {
+    gum spin --spinner points --title "Hardening SSH..." -- sleep 2
     cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-    
-    # Disable Root Login
     sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
     sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-    
-    # Disable Password Auth
     sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
     sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-    
     systemctl restart ssh
-    log "END: SSH Hardening completed."
-    whiptail --msgbox "SSH Configured. Root Login & Password Auth disabled." 8 60
+    style_success "SSH Hardening Selesai (Root Login & Password Auth OFF)"
+    log "SSH Hardened"
 }
 
-run_firewall() {
-    log "START: Firewall Setup"
+task_firewall() {
+    gum spin --spinner line --title "Setting up UFW Firewall..." -- sleep 1
     ufw default deny incoming
     ufw default allow outgoing
     ufw allow ssh
     ufw allow http
     ufw allow https
-    
-    echo "y" | ufw enable
-    log "END: UFW Firewall active."
+    echo "y" | ufw enable > /dev/null
+    style_success "Firewall Aktif (SSH, HTTP, HTTPS Allowed)"
+    log "Firewall Activated"
 }
 
-run_fail2ban() {
-    log "START: Install Fail2Ban"
-    apt-get install fail2ban -y
-    
-    # Copy default config to local to prevent overwrite during updates
-    if [ ! -f /etc/fail2ban/jail.local ]; then
-        cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-    fi
-    
-    systemctl enable fail2ban
-    systemctl start fail2ban
-    log "END: Fail2Ban active."
+task_fail2ban() {
+    gum spin --spinner globe --title "Installing Fail2Ban..." -- \
+    bash -c "apt-get install fail2ban -y && cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local && systemctl enable fail2ban && systemctl start fail2ban"
+    style_success "Fail2Ban Installed & Running"
+    log "Fail2Ban Installed"
 }
 
-run_timezone() {
-    timedatectl set-timezone Asia/Jakarta
-    log "Timezone set to Asia/Jakarta."
+task_timezone() {
+    gum spin --spinner moon --title "Setting Timezone..." -- timedatectl set-timezone Asia/Jakarta
+    style_success "Timezone set to Asia/Jakarta"
+    log "Timezone Set"
 }
 
-run_swap() {
-    # Check double execution
+task_swap() {
     if swapon --show | grep -q "file"; then
-        whiptail --msgbox "Swap file already exists. Skipping." 8 45
+        style_success "Swap file sudah ada."
         return
     fi
     
-    log "START: Setup Dynamic Swap"
-    
-    # 1. Calculate RAM (MB) & Target Swap (2x RAM)
     TOTAL_RAM_MB=$(free -m | awk '/Mem:/ {print $2}')
     SWAP_SIZE_MB=$((TOTAL_RAM_MB * 2))
     
-    whiptail --msgbox "Detected RAM: ${TOTAL_RAM_MB} MB\nTarget Swap: ${SWAP_SIZE_MB} MB (2x RAM)\n\nClick OK to proceed..." 12 50
-    
-    # 2. Create File
-    # Try fallocate first (faster), if fails use dd
-    if ! fallocate -l "${SWAP_SIZE_MB}M" /swapfile; then
-        log "Fallocate failed, using DD..."
-        dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_SIZE_MB status=progress
-    fi
-    
-    # 3. Secure & Activate
-    chmod 600 /swapfile
-    mkswap /swapfile
-    swapon /swapfile
-    
-    # 4. Add to fstab (Permanent)
-    if ! grep -q "/swapfile" /etc/fstab; then
-        echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
-    fi
-    
-    log "END: Swap ${SWAP_SIZE_MB}MB created."
-    whiptail --msgbox "Swap file ${SWAP_SIZE_MB}MB successfully created!" 8 45
+    gum confirm "RAM: ${TOTAL_RAM_MB}MB. Buat Swap ${SWAP_SIZE_MB}MB?" && {
+        gum spin --spinner pulse --title "Creating Swap File (${SWAP_SIZE_MB}MB)..." -- \
+        bash -c "fallocate -l ${SWAP_SIZE_MB}M /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_SIZE_MB; chmod 600 /swapfile; mkswap /swapfile; swapon /swapfile"
+        
+        if ! grep -q "/swapfile" /etc/fstab; then
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+        fi
+        style_success "Swap ${SWAP_SIZE_MB}MB Created."
+        log "Swap Created"
+    } || style_error "Swap creation cancelled."
 }
 
-# --- MAIN MENU LOOP ---
+# --- MAIN MENU ---
 
-while true; do
-    # Update status indicators
-    S_UPDATE=$(check_update)
-    S_USER=$(check_user)
-    S_SSH=$(check_ssh)
-    S_UFW=$(check_firewall)
-    S_F2B=$(check_fail2ban)
-    S_TZ=$(check_timezone)
-    S_SWAP=$(check_swap)
+clear
+style_header "SERVER AUTOMATION KIT"
 
-    CHOICES=$(whiptail --title "VPS Setup Automation" --checklist \
-    "Navigation: [↑/↓] Move, [Space] Select, [Enter] Confirm" 20 78 10 \
-    "1" "Update & Upgrade OS" "$S_UPDATE" \
-    "2" "Create Sudo User & Key" "$S_USER" \
-    "3" "Harden SSH (No Root/Pass)" "$S_SSH" \
-    "4" "Setup Firewall (UFW)" "$S_UFW" \
-    "5" "Install Fail2Ban" "$S_F2B" \
-    "6" "Set Timezone (Asia/Jakarta)" "$S_TZ" \
-    "7" "Auto Swap (2x RAM)" "$S_SWAP" 3>&1 1>&2 2>&3)
+echo "Mendeteksi konfigurasi saat ini..."
+# Prepare Menu Items based on current state
+OPT_UPDATE=$(get_status "Update System" check_is_updated)
+OPT_USER=$(get_status "Create User & Key" check_is_user_exist)
+OPT_SSH=$(get_status "Harden SSH Security" check_is_ssh_hardened)
+OPT_FIREWALL=$(get_status "Setup Firewall" check_is_firewall_active)
+OPT_F2B=$(get_status "Install Fail2Ban" check_is_fail2ban_active)
+OPT_TZ=$(get_status "Set Timezone WIB" check_is_timezone_set)
+OPT_SWAP=$(get_status "Auto Swap (2x RAM)" check_is_swap_exist)
 
-    exitstatus=$?
-    if [ $exitstatus = 0 ]; then
-        # Process user choices
-        for CHOICE in $CHOICES; do
-            case "$CHOICE" in
-                "\"1\"") run_update ;;
-                "\"2\"") run_user ;;
-                "\"3\"") run_ssh_harden ;;
-                "\"4\"") run_firewall ;;
-                "\"5\"") run_fail2ban ;;
-                "\"6\"") run_timezone ;;
-                "\"7\"") run_swap ;;
-            esac
-        done
-        whiptail --msgbox "All selected tasks completed!" 8 45
-        break
-    else
-        echo "Setup cancelled."
-        break
-    fi
+echo ""
+gum style --foreground 244 "Gunakan [SPASI] untuk memilih, [ENTER] untuk konfirmasi."
+
+# GUM CHOOSE: The Interactive Part
+SELECTED=$(gum choose --no-limit --cursor-prefix "👉 " --selected.foreground 212 --height 15 \
+    "$OPT_UPDATE" \
+    "$OPT_USER" \
+    "$OPT_SSH" \
+    "$OPT_FIREWALL" \
+    "$OPT_F2B" \
+    "$OPT_TZ" \
+    "$OPT_SWAP")
+
+if [ -z "$SELECTED" ]; then
+    style_error "Tidak ada yang dipilih. Keluar."
+    exit 0
+fi
+
+echo ""
+style_header "STARTING TASKS"
+
+# Process Selection
+# Kita grep string output dari gum choose
+echo "$SELECTED" | while read -r item; do
+    case "$item" in
+        *"Update System"*) task_update ;;
+        *"Create User"*) task_user ;;
+        *"Harden SSH"*) task_ssh ;;
+        *"Setup Firewall"*) task_firewall ;;
+        *"Install Fail2Ban"*) task_fail2ban ;;
+        *"Set Timezone"*) task_timezone ;;
+        *"Auto Swap"*) task_swap ;;
+    esac
 done
+
+echo ""
+style_header "ALL DONE! 🚀"
