@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER AUTOMATION WIZARD (V7 - DASHBOARD UI)
-# Features: Compact Tasks, Dynamic Config Columns, Silent Mode
+# SERVER AUTOMATION WIZARD (V9 - DETAIL & REALTIME)
+# Features: Port Listing, Jail Listing, Live Updates
 # ==========================================================
 
 # --- 1. ROOT CHECK ---
@@ -19,39 +19,39 @@ YELLOW="\e[33m"
 BLUE="\e[34m"
 CYAN="\e[36m"
 GRAY="\e[90m"
-WHITE="\e[97m"
 RESET="\e[0m"
 
 # Symbols
 CHECK_MARK="${GREEN}✔${RESET}"
 CROSS_MARK="${RED}✘${RESET}"
 
-# --- 3. DATA RETRIEVAL FUNCTIONS (For Config Column) ---
+# --- 3. CONFIG DETAIL FUNCTIONS (UPDATED) ---
 
 get_hostname_val() {
-    hostname
+    echo "$(hostname)"
 }
 
 get_update_val() {
     if [ -f /var/lib/apt/periodic/update-success-stamp ]; then
-        # Check if updated in last 24h
         if find /var/lib/apt/periodic/update-success-stamp -mtime -1 2>/dev/null | grep -q .; then
-            echo -e "${GREEN}Up to Date${RESET}"
+            echo "Updated (<24h)"
         else
-            echo -e "${YELLOW}Update Needed${RESET}"
+            echo "Old Update (>24h)"
         fi
     else
-        echo -e "${RED}Never Updated${RESET}"
+        echo "Never Updated"
     fi
 }
 
 get_user_val() {
-    # Count users with UID >= 1000
-    USER_COUNT=$(awk -F: '$3 >= 1000 && $1 != "nobody"' /etc/passwd | wc -l)
-    if [ "$USER_COUNT" -gt 0 ]; then
-        echo -e "${GREEN}${USER_COUNT} Sudo User(s)${RESET}"
+    # Ambil user terakhir yang dibuat (UID >= 1000)
+    LAST_USER=$(awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd | tail -n 1)
+    COUNT=$(awk -F: '$3 >= 1000 && $1 != "nobody"' /etc/passwd | wc -l)
+    
+    if [ "$COUNT" -gt 0 ]; then
+        echo "$COUNT User(s) (Last: $LAST_USER)"
     else
-        echo -e "${RED}Root Only${RESET}"
+        echo "Root Only"
     fi
 }
 
@@ -61,33 +61,51 @@ get_ssh_val() {
         return
     fi
     
-    # Get Port
+    # Ambil Port
     PORT=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}')
-    PORT=${PORT:-22} # Default 22 if not found
+    PORT=${PORT:-22}
     
-    # Get Root Login Status
+    # Cek Root Login
     if grep -q "^PermitRootLogin no" /etc/ssh/sshd_config; then
-        ROOT_STAT="${GREEN}Root:OFF${RESET}"
+        R_LOGIN="Root:OFF"
     else
-        ROOT_STAT="${RED}Root:ON${RESET}"
+        R_LOGIN="Root:ON" 
     fi
-    
-    echo -e "Port:${BOLD}${PORT}${RESET} | ${ROOT_STAT}"
+
+    echo "Port:$PORT | $R_LOGIN"
 }
 
 get_fw_val() {
     if ! command -v ufw &> /dev/null; then
         echo "Not Installed"
-    elif ufw status | grep -q "Status: active"; then
-        echo -e "${GREEN}Active${RESET}"
+        return
+    fi
+
+    if ufw status | grep -q "Status: active"; then
+        # Ambil daftar port yang ALLOW, hilangkan duplikat v6, format jadi satu baris koma
+        # Contoh Output: 22, 80, 443
+        PORTS=$(ufw status | grep "ALLOW" | grep -v "(v6)" | awk -F"/" '{print $1}' | sort -nu | tr '\n' ',' | sed 's/,$//')
+        
+        if [ -z "$PORTS" ]; then
+            echo "Active (No Ports Open)"
+        else
+            # Tampilkan port yg open
+            echo "Open: $PORTS"
+        fi
     else
-        echo -e "${RED}Inactive${RESET}"
+        echo "Inactive"
     fi
 }
 
 get_f2b_val() {
     if systemctl is-active --quiet fail2ban 2>/dev/null; then
-         echo -e "${GREEN}Running${RESET}"
+         # Ambil nama Jail (misal: sshd)
+         JAILS=$(fail2ban-client status 2>/dev/null | grep "Jail list" | cut -d: -f2 | sed 's/\t//g' | sed 's/,//g' | sed 's/^ *//g')
+         if [ -z "$JAILS" ]; then
+            echo "Active (0 Jails)"
+         else
+            echo "Active (Jails: $JAILS)"
+         fi
     else
          echo "Not Running"
     fi
@@ -100,13 +118,13 @@ get_tz_val() {
 get_swap_val() {
     if swapon --show | grep -q "file"; then
         SIZE=$(free -m | awk '/Swap:/ {print $2}')
-        echo -e "${GREEN}${SIZE} MB${RESET}"
+        echo "${SIZE} MB"
     else
-        echo -e "${RED}No Swap${RESET}"
+        echo "No Swap"
     fi
 }
 
-# --- 4. STATUS CHECK FUNCTIONS (For Checkbox) ---
+# --- 4. STATUS CHECK LOGIC ---
 is_hostname_set() { [ "$(hostname)" != "ubuntu" ]; }
 is_updated() { [ -f /var/lib/apt/periodic/update-success-stamp ] && find /var/lib/apt/periodic/update-success-stamp -mtime -1 2>/dev/null | grep -q .; }
 is_user_ok() { awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd 2>/dev/null | grep -q .; }
@@ -126,61 +144,42 @@ while true; do
     clear
     # Header
     echo -e "${CYAN}╔════════════════════════════════════════════════════════════════════╗${RESET}"
-    echo -e "${CYAN}║                SERVER CONFIGURATION DASHBOARD (V7)                 ║${RESET}"
+    echo -e "${CYAN}║                SERVER CONFIGURATION DASHBOARD (V9)                 ║${RESET}"
     echo -e "${CYAN}╚════════════════════════════════════════════════════════════════════╝${RESET}"
     
-    # System Info Header
     IP=$(hostname -I | cut -d' ' -f1)
     echo -e " Host: ${BOLD}$(hostname)${RESET}  |  IP: ${BOLD}$IP${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────────────${RESET}"
     
     # TABLE HEADER
-    # Format: No | Stat | TaskName (Short) | Detail (Long)
-    printf " ${BOLD}%-3s %-6s %-25s %-30s${RESET}\n" "NO" "STAT" "TASK" "CURRENT CONFIG"
-    echo -e "${BLUE} ─── ────── ───────────────────────── ──────────────────────────────${RESET}"
+    printf " ${BOLD}%-3s %-6s %-20s %-35s${RESET}\n" "NO" "STAT" "TASK" "CURRENT CONFIG DETAIL"
+    echo -e "${BLUE} ─── ────── ──────────────────── ───────────────────────────────────${RESET}"
 
-    # ROW 1: Hostname
-    printf " %-3s %-15s %-25s %-30s\n" "1." "$(stat_icon is_hostname_set)" "Set Hostname" "$(get_hostname_val)"
-    
-    # ROW 2: Update
-    printf " %-3s %-15s %-25s %-30s\n" "2." "$(stat_icon is_updated)" "System Update" "$(get_update_val)"
+    # TABLE BODY - Get Values Called Here (Real-time update happens here)
+    printf " %-3s %-15s %-20s %-35s\n" "1." "$(stat_icon is_hostname_set)" "Set Hostname" "$(get_hostname_val)"
+    printf " %-3s %-15s %-20s %-35s\n" "2." "$(stat_icon is_updated)" "System Update" "$(get_update_val)"
+    printf " %-3s %-15s %-20s %-35s\n" "3." "$(stat_icon is_user_ok)" "Create Sudo User" "$(get_user_val)"
+    printf " %-3s %-15s %-20s %-35s\n" "4." "$(stat_icon is_ssh_ok)" "SSH Hardening" "$(get_ssh_val)"
+    printf " %-3s %-15s %-20s %-35s\n" "5." "$(stat_icon is_fw_ok)" "Setup Firewall" "$(get_fw_val)"
+    printf " %-3s %-15s %-20s %-35s\n" "6." "$(stat_icon is_f2b_ok)" "Fail2Ban" "$(get_f2b_val)"
+    printf " %-3s %-15s %-20s %-35s\n" "7." "$(stat_icon is_tz_ok)" "Set Timezone" "$(get_tz_val)"
+    printf " %-3s %-15s %-20s %-35s\n" "8." "$(stat_icon is_swap_ok)" "Auto Swap" "$(get_swap_val)"
 
-    # ROW 3: User
-    printf " %-3s %-15s %-25s %-30s\n" "3." "$(stat_icon is_user_ok)" "Create Sudo User" "$(get_user_val)"
-
-    # ROW 4: SSH
-    printf " %-3s %-15s %-25s %-30s\n" "4." "$(stat_icon is_ssh_ok)" "SSH Hardening" "$(get_ssh_val)"
-
-    # ROW 5: Firewall
-    printf " %-3s %-15s %-25s %-30s\n" "5." "$(stat_icon is_fw_ok)" "Setup Firewall" "$(get_fw_val)"
-
-    # ROW 6: Fail2Ban
-    printf " %-3s %-15s %-25s %-30s\n" "6." "$(stat_icon is_f2b_ok)" "Fail2Ban" "$(get_f2b_val)"
-
-    # ROW 7: Timezone
-    printf " %-3s %-15s %-25s %-30s\n" "7." "$(stat_icon is_tz_ok)" "Set Timezone" "$(get_tz_val)"
-
-    # ROW 8: Swap
-    printf " %-3s %-15s %-25s %-30s\n" "8." "$(stat_icon is_swap_ok)" "Auto Swap" "$(get_swap_val)"
-
-    echo -e "${BLUE} ─── ────── ───────────────────────── ──────────────────────────────${RESET}"
-    echo -e " ${BOLD}0.${RESET}  [EXIT] Close"
+    echo -e "${BLUE} ─── ────── ──────────────────── ───────────────────────────────────${RESET}"
+    echo -e " ${BOLD}0.${RESET}  [EXIT] Close Dashboard"
     echo ""
     
     # --- INPUT ---
     echo -e "${GRAY}Select task number (e.g., '1 4 5') or 'a' for all:${RESET}"
     read -p " ➤ " SELECTION
 
-    # EXIT
     if [[ "$SELECTION" == "0" || "$SELECTION" == "q" ]]; then
         echo -e "\n${GREEN}Bye!${RESET}\n"; break
     fi
-
     if [[ "$SELECTION" == "a" || "$SELECTION" == "A" ]]; then SELECTION="1 2 3 4 5 6 7 8"; fi
-    
     echo ""
 
-    # --- EXECUTION ---
+    # --- EXECUTION LOOP ---
     for TASK in $SELECTION; do
         case "$TASK" in
             1)
@@ -235,7 +234,7 @@ while true; do
                 sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
                 
                 systemctl restart ssh > /dev/null 2>&1
-                echo -e "${GREEN}   Done. Port: $SSH_PORT${RESET}"
+                echo -e "${GREEN}   Done. Port set to $SSH_PORT.${RESET}"
                 ;;
             5)
                 echo -e "${YELLOW}>> Configuring Firewall...${RESET}"
@@ -250,7 +249,7 @@ while true; do
                 ufw allow 80/tcp > /dev/null 2>&1
                 ufw allow 443/tcp > /dev/null 2>&1
                 echo "y" | ufw enable > /dev/null 2>&1
-                echo -e "${GREEN}   Done.${RESET}"
+                echo -e "${GREEN}   Done. Rules updated.${RESET}"
                 ;;
             6)
                 echo -e "${YELLOW}>> Installing Fail2Ban...${RESET}"
