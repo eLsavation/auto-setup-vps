@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V2 - SSH FIX & VALIDATOR)
+# SERVER SETUP AUTOMATION (V3 - SSH FIX /RUN/SSHD)
 # Author: github.com/eLsavation
 # ==========================================================
 
@@ -105,7 +105,7 @@ draw_header() {
     AUTHOR="github.com/eLsavation"
 
     printf "${CYAN}╔═════════════════════════════════════════════════════════════════╗${RESET}\n"
-    printf "${CYAN}║${RESET} ${BOLD}${WHITE}%-44s${RESET} ${DIM}%20s${RESET} ${CYAN}║${RESET}\n" "VPS AUTO SETUP WIZARD" "v2"
+    printf "${CYAN}║${RESET} ${BOLD}${WHITE}%-44s${RESET} ${DIM}%20s${RESET} ${CYAN}║${RESET}\n" "VPS AUTO SETUP WIZARD" "v3"
     printf "${CYAN}╠═════════════════════════════════════════════════════════════════╣${RESET}\n"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Author" "$AUTHOR"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Hostname" "$MY_HOST"
@@ -191,41 +191,39 @@ while true; do
             4)
                 echo -e "  ${CYAN}>> SSH Hardening...${RESET}"
                 if [ ! -f /etc/ssh/sshd_config ]; then apt-get install openssh-server -y >/dev/null 2>&1; fi
-                
-                # Backup config
                 cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null
                 
                 read -p "     Port [22]: " SSH_PORT
                 SSH_PORT=${SSH_PORT:-22}
                 
-                # Clean up old port settings first (prevent duplicate port lines)
                 sed -i '/^Port/d' /etc/ssh/sshd_config
                 sed -i '/^#Port/d' /etc/ssh/sshd_config
-                
-                # Insert new configs
                 echo "Port $SSH_PORT" >> /etc/ssh/sshd_config
                 sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
                 sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
                 sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
                 sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
                 
-                # VALIDATE CONFIG BEFORE RESTART
+                # [CRITICAL FIX] Create privilege separation directory
+                if [ ! -d "/run/sshd" ]; then
+                    echo -e "     ${YELLOW}Fixing missing /run/sshd directory...${RESET}"
+                    mkdir -p /run/sshd
+                    chmod 0755 /run/sshd
+                fi
+                
+                # VALIDATE
                 echo -e "     ${YELLOW}Validating SSH config...${RESET}"
                 if sshd -t; then
                     echo -e "     ${GREEN}Config OK. Restarting SSH...${RESET}"
-                    
-                    # Try restarting both common service names
                     systemctl restart sshd >/dev/null 2>&1
                     systemctl restart ssh >/dev/null 2>&1
                     
-                    # LIVE CHECK
                     sleep 2
                     if command -v ss &> /dev/null; then
                         CHECK_PORT=$(ss -tulpn | grep ssh | awk '{print $5}' | cut -d: -f2 | head -n 1)
                     else
                         CHECK_PORT=$(netstat -tulpn | grep ssh | awk '{print $4}' | cut -d: -f2 | head -n 1)
                     fi
-                    
                     echo -e "     ${GREEN}Success! SSH Listening on Port: ${CHECK_PORT:-Unknown}${RESET}"
                 else
                     echo -e "     ${RED}Config Error! Reverting to backup...${RESET}"
