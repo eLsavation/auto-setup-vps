@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V14 - BRANDED BANNER)
+# SERVER SETUP AUTOMATION (V15 - ULTIMATE BANNER)
 # Author: github.com/eLsavation
 # ==========================================================
 
@@ -12,6 +12,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # --- 2. STYLING VARS ---
+# ANSI Color Codes (Fixed for all terminals)
 BOLD=$'\033[1m'
 DIM=$'\033[2m'
 RED=$'\033[31m'
@@ -91,25 +92,37 @@ is_swap_ok() { swapon --show --noheadings 2>/dev/null | grep -q "."; }
 
 stat_icon() { if $1; then echo -e "$ICON_OK"; else echo -e "$ICON_NO"; fi; }
 
-# --- 5. UI COMPONENTS (NEW BANNER) ---
+# --- 5. UI COMPONENTS (FULL INFO BANNER) ---
 
 draw_line() { echo -e "${DIM}────────────────────────────────────────────────────────────────────────${RESET}"; }
 
 draw_header() {
     clear
-    # System Info for Banner
-    IP=$(hostname -I | cut -d' ' -f1)
-    OS_SHORT=$(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2 | cut -d' ' -f1,2)
+    # Gather Info
+    MY_HOST=$(hostname)
+    MY_IP=$(hostname -I | cut -d' ' -f1)
+    MY_OS=$(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)
+    # Potong nama OS jika terlalu panjang agar tabel tidak rusak
+    if [ ${#MY_OS} -gt 45 ]; then MY_OS="${MY_OS:0:42}..."; fi
+    
     RAM_TOTAL=$(free -h | awk '/Mem:/ {print $2}')
     CPU_CORES=$(nproc)
+    AUTHOR="github.com/eLsavation"
 
-    # BRANDED BANNER
+    # Draw Box with Printf for alignment
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════╗${RESET}"
-    echo -e "${CYAN}║${RESET}   ${BOLD}${WHITE}VPS AUTO SETUP WIZARD${RESET}                                ${DIM}v14.0 (Pro)${RESET}   ${CYAN}║${RESET}"
+    echo -e "${CYAN}║${RESET}   ${BOLD}${WHITE}VPS AUTO SETUP WIZARD${RESET}                                ${DIM}v15.0 (Pro)${RESET}   ${CYAN}║${RESET}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════╣${RESET}"
-    echo -e "${CYAN}║${RESET}   ${YELLOW}${BOLD}Author${RESET}  : github.com/eLsavation                                  ${CYAN}║${RESET}"
-    echo -e "${CYAN}║${RESET}   ${YELLOW}System${RESET}  : $OS_SHORT ($IP)                           ${CYAN}║${RESET}"
-    echo -e "${CYAN}║${RESET}   ${YELLOW}Specs${RESET}   : ${WHITE}${CPU_CORES} vCPU${RESET} / ${WHITE}${RAM_TOTAL} RAM${RESET}                                   ${CYAN}║${RESET}"
+    
+    # Format: Border | Label (Yellow) : Value (White) | Border
+    # %-10s = Label rata kiri lebar 10
+    # %-50s = Value rata kiri lebar 50
+    printf "${CYAN}║${RESET}   ${YELLOW}%-10s${RESET} : %-50s ${CYAN}║${RESET}\n" "Author" "$AUTHOR"
+    printf "${CYAN}║${RESET}   ${YELLOW}%-10s${RESET} : %-50s ${CYAN}║${RESET}\n" "Hostname" "$MY_HOST"
+    printf "${CYAN}║${RESET}   ${YELLOW}%-10s${RESET} : %-50s ${CYAN}║${RESET}\n" "IP Addr" "$MY_IP"
+    printf "${CYAN}║${RESET}   ${YELLOW}%-10s${RESET} : %-50s ${CYAN}║${RESET}\n" "OS System" "$MY_OS"
+    printf "${CYAN}║${RESET}   ${YELLOW}%-10s${RESET} : %-50s ${CYAN}║${RESET}\n" "Specs" "${CPU_CORES} vCPU / ${RAM_TOTAL} RAM"
+    
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════╝${RESET}"
     echo ""
 }
