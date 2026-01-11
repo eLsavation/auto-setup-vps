@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V1 - USER FIX)
+# SERVER SETUP AUTOMATION (V1 - CLEAN & FIXED)
 # Author: github.com/eLsavation
 # ==========================================================
 
@@ -178,11 +178,8 @@ while true; do
                     adduser --disabled-password --gecos "" "$NEW_USER" >/dev/null 2>&1
                     usermod -aG sudo "$NEW_USER"
                     
-                    # 2. Pesan JELAS sebelum input password
+                    # 2. Minta password secara eksplisit (Note dihapus)
                     echo -e "     ${YELLOW}Set Password for $NEW_USER:${RESET}"
-                    echo -e "     ${DIM}(NOTE: Ketikan Anda akan TERSEMBUNYI / Invisible. Cukup ketik & Enter)${RESET}"
-                    
-                    # 3. Panggil passwd secara interaktif
                     passwd "$NEW_USER"
                     
                     mkdir -p /home/$NEW_USER/.ssh
