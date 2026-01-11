@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V3 - SSH FIX /RUN/SSHD)
+# SERVER SETUP AUTOMATION (V4 - UBUNTU 24.04 FIX)
 # Author: github.com/eLsavation
 # ==========================================================
 
@@ -46,6 +46,7 @@ get_user_val() {
 
 get_ssh_val() {
     if [ ! -f /etc/ssh/sshd_config ]; then echo "Not Installed"; return; fi
+    # Cek port dari config, tapi fallback ke socket check kalau config 22
     PORT=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}'); PORT=${PORT:-22}
     if grep -q "^PermitRootLogin no" /etc/ssh/sshd_config; then ROOT="${GREEN}OFF${RESET}"; else ROOT="${RED}ON${RESET}"; fi
     echo "Port $PORT | Root $ROOT"
@@ -105,7 +106,7 @@ draw_header() {
     AUTHOR="github.com/eLsavation"
 
     printf "${CYAN}╔═════════════════════════════════════════════════════════════════╗${RESET}\n"
-    printf "${CYAN}║${RESET} ${BOLD}${WHITE}%-44s${RESET} ${DIM}%20s${RESET} ${CYAN}║${RESET}\n" "VPS AUTO SETUP WIZARD" "v3"
+    printf "${CYAN}║${RESET} ${BOLD}${WHITE}%-44s${RESET} ${DIM}%20s${RESET} ${CYAN}║${RESET}\n" "VPS AUTO SETUP WIZARD" "v4"
     printf "${CYAN}╠═════════════════════════════════════════════════════════════════╣${RESET}\n"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Author" "$AUTHOR"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Hostname" "$MY_HOST"
@@ -204,32 +205,46 @@ while true; do
                 sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
                 sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
                 
-                # [CRITICAL FIX] Create privilege separation directory
-                if [ ! -d "/run/sshd" ]; then
-                    echo -e "     ${YELLOW}Fixing missing /run/sshd directory...${RESET}"
-                    mkdir -p /run/sshd
-                    chmod 0755 /run/sshd
+                # [FIX 1] Create directory (from previous fix)
+                mkdir -p /run/sshd
+                chmod 0755 /run/sshd
+                
+                # [FIX 2] Handle Ubuntu 24.04 Socket Activation
+                # Jika ssh.socket aktif, systemd akan mengabaikan Port di sshd_config.
+                # Kita harus mematikan socket dan enable service biasa.
+                if systemctl is-active --quiet ssh.socket; then
+                    echo -e "     ${YELLOW}Disabling SSH Socket Activation (Ubuntu 24.04+)...${RESET}"
+                    systemctl stop ssh.socket >/dev/null 2>&1
+                    systemctl disable ssh.socket >/dev/null 2>&1
+                    systemctl unmask ssh.service >/dev/null 2>&1
                 fi
                 
-                # VALIDATE
-                echo -e "     ${YELLOW}Validating SSH config...${RESET}"
+                # VALIDATE & RESTART
+                echo -e "     ${YELLOW}Validating & Restarting...${RESET}"
                 if sshd -t; then
-                    echo -e "     ${GREEN}Config OK. Restarting SSH...${RESET}"
-                    systemctl restart sshd >/dev/null 2>&1
+                    systemctl enable ssh >/dev/null 2>&1
                     systemctl restart ssh >/dev/null 2>&1
+                    systemctl restart sshd >/dev/null 2>&1 # just in case
                     
-                    sleep 2
+                    sleep 3
+                    
+                    # LIVE PORT CHECK
                     if command -v ss &> /dev/null; then
                         CHECK_PORT=$(ss -tulpn | grep ssh | awk '{print $5}' | cut -d: -f2 | head -n 1)
                     else
                         CHECK_PORT=$(netstat -tulpn | grep ssh | awk '{print $4}' | cut -d: -f2 | head -n 1)
                     fi
-                    echo -e "     ${GREEN}Success! SSH Listening on Port: ${CHECK_PORT:-Unknown}${RESET}"
+                    
+                    if [[ "$CHECK_PORT" == "$SSH_PORT" ]]; then
+                        echo -e "     ${GREEN}Success! SSH Listening on Port: $CHECK_PORT${RESET}"
+                    else
+                        echo -e "     ${RED}Warning! Config loaded but Port is $CHECK_PORT (Expected: $SSH_PORT)${RESET}"
+                        echo -e "     ${DIM}Try rebooting the server if this persists.${RESET}"
+                    fi
                 else
-                    echo -e "     ${RED}Config Error! Reverting to backup...${RESET}"
+                    echo -e "     ${RED}Config Error! Reverting...${RESET}"
                     cp /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
                     systemctl restart ssh
-                    echo -e "     ${RED}Failed. Please check /etc/ssh/sshd_config manually.${RESET}"
                 fi
                 ;;
             5)
