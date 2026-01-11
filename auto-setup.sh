@@ -1,231 +1,143 @@
 #!/bin/bash
 
-# ==============================================================================
-# PRO BASH SERVER SETUP
-# ==============================================================================
+# --- KONFIGURASI WARNA (Aesthetic) ---
+BOLD="\e[1m"
+RED="\e[31m"
+GREEN="\e[32m"
+YELLOW="\e[33m"
+BLUE="\e[34m"
+CYAN="\e[36m"
+RESET="\e[0m"
 
-# --- WARNA & FORMATTING ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[1;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+# Simbol Status
+CHECK_MARK="${GREEN}✔${RESET}"
+CROSS_MARK="${RED}✘${RESET}"
 
-# --- VARIABLES ---
-LOG_FILE="/var/log/pro_setup.log"
-declare -a TASKS
-declare -a STATUS
-declare -a SELECTED
+# --- FUNGSI CEK STATUS ---
+is_updated() { [ -f /var/lib/apt/periodic/update-success-stamp ] && find /var/lib/apt/periodic/update-success-stamp -mtime -1 | grep -q .; }
+is_user_ok() { awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd | grep -q .; }
+is_ssh_ok()  { grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config; }
+is_fw_ok()   { ufw status | grep -q "Status: active"; }
+is_f2b_ok()  { systemctl is-active --quiet fail2ban; }
+is_tz_ok()   { timedatectl | grep -q "Asia/Jakarta"; }
+is_swap_ok() { swapon --show --noheadings | grep -q "."; }
 
-TASKS[1]="System Update & Upgrade"
-TASKS[2]="Create User & SSH Key"
-TASKS[3]="Harden SSH (No Root/Pass)"
-TASKS[4]="Setup UFW Firewall"
-TASKS[5]="Install Fail2Ban"
-TASKS[6]="Set Timezone (WIB)"
-TASKS[7]="Auto Swap (2x RAM)"
-
-# Default selection: False (Not selected)
-for i in {1..7}; do SELECTED[$i]=false; done
-
-# --- HELPER FUNCTIONS ---
-log() { echo "[$(date)] $1" >> "$LOG_FILE"; }
-
-header() {
-    clear
-    echo -e "${BLUE}============================================================${NC}"
-    echo -e "${BOLD}   SERVER AUTOMATION DASHBOARD   ${NC}"
-    echo -e "${BLUE}============================================================${NC}"
-    echo -e "   ${CYAN}Hostname:${NC} $(hostname)  |  ${CYAN}IP:${NC} $(hostname -I | cut -d' ' -f1)"
-    echo -e "   ${CYAN}OS:${NC} $(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)"
-    echo -e "${BLUE}------------------------------------------------------------${NC}"
-    echo -e "   ${BOLD}NO  | STATUS    | SELECT | TASK NAME${NC}"
-    echo -e "${BLUE}------------------------------------------------------------${NC}"
+# Helper Status Display
+stat() {
+    if $1; then echo -e "$CHECK_MARK"; else echo -e "$CROSS_MARK"; fi
 }
 
-# --- CHECK FUNCTIONS (Real-time Status) ---
-get_status_symbol() {
-    if [ "$1" == "ON" ]; then echo -e "${GREEN}[OK]${NC} "; else echo -e "${RED}[--]${NC} "; fi
-}
+# --- HEADER ---
+clear
+echo -e "${BLUE}┌──────────────────────────────────────────────┐${RESET}"
+echo -e "${BLUE}│         VPS SETUP WIZARD (MINIMALIST)        │${RESET}"
+echo -e "${BLUE}└──────────────────────────────────────────────┘${RESET}"
+echo -e " Halo, ${BOLD}root${RESET}. Berikut status server Anda:\n"
 
-refresh_status() {
-    # 1. Update
-    if [ -f /var/lib/apt/periodic/update-success-stamp ] && find /var/lib/apt/periodic/update-success-stamp -mtime -1 | grep -q .; then
-        STATUS[1]="ON"; else STATUS[1]="OFF"; fi
-    
-    # 2. User
-    if awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd | grep -q .; then
-        STATUS[2]="ON"; else STATUS[2]="OFF"; fi
+# --- LIST MENU ---
+echo -e " ${BOLD}NO  STATUS   TASK NAME${RESET}"
+echo -e " ${BLUE}──  ──────   ─────────${RESET}"
+echo -e " ${BOLD}1.${RESET}  [ $(stat is_updated) ]   Update & Upgrade OS"
+echo -e " ${BOLD}2.${RESET}  [ $(stat is_user_ok) ]   Create User & Key"
+echo -e " ${BOLD}3.${RESET}  [ $(stat is_ssh_ok) ]   Harden SSH (Security)"
+echo -e " ${BOLD}4.${RESET}  [ $(stat is_fw_ok) ]   Setup Firewall (UFW)"
+echo -e " ${BOLD}5.${RESET}  [ $(stat is_f2b_ok) ]   Install Fail2Ban"
+echo -e " ${BOLD}6.${RESET}  [ $(stat is_tz_ok) ]   Set Timezone (WIB)"
+echo -e " ${BOLD}7.${RESET}  [ $(stat is_swap_ok) ]   Auto Swap (2x RAM)"
+echo ""
+echo -e "${CYAN}Tips: Masukkan nomor dipisah spasi (Contoh: 1 3 7) atau 'a' untuk semua.${RESET}"
 
-    # 3. SSH
-    if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config; then
-        STATUS[3]="ON"; else STATUS[3]="OFF"; fi
+# --- INPUT USER ---
+read -p " ➤ Pilih Task: " SELECTION
 
-    # 4. Firewall
-    if ufw status | grep -q "Status: active"; then
-        STATUS[4]="ON"; else STATUS[4]="OFF"; fi
+# --- LOGIC EKSEKUSI ---
 
-    # 5. Fail2Ban
-    if systemctl is-active --quiet fail2ban; then
-        STATUS[5]="ON"; else STATUS[5]="OFF"; fi
-    
-    # 6. Timezone
-    if timedatectl | grep -q "Asia/Jakarta"; then
-        STATUS[6]="ON"; else STATUS[6]="OFF"; fi
+# Jika user pilih 'a' (All)
+if [[ "$SELECTION" == "a" || "$SELECTION" == "A" ]]; then
+    SELECTION="1 2 3 4 5 6 7"
+fi
 
-    # 7. Swap
-    if swapon --show --noheadings | grep -q "."; then
-        STATUS[7]="ON"; else STATUS[7]="OFF"; fi
-}
+echo ""
 
-# --- ACTION FUNCTIONS ---
-run_task_1() {
-    echo -e "${YELLOW}>> Updating System...${NC}"
-    apt-get update -qq && apt-get upgrade -y -qq && apt-get autoremove -y -qq
-    touch /var/lib/apt/periodic/update-success-stamp
-}
-
-run_task_2() {
-    echo -e "${YELLOW}>> Creating User...${NC}"
-    read -p "   Enter New Username: " NEW_USER
-    if id "$NEW_USER" &>/dev/null; then
-        echo -e "${RED}   User exists!${NC}"
-    else
-        adduser --gecos "" "$NEW_USER"
-        usermod -aG sudo "$NEW_USER"
-        mkdir -p /home/$NEW_USER/.ssh
-        echo -e "${CYAN}   Paste SSH Public Key below (Enter to skip):${NC}"
-        read -r PUB_KEY
-        if [ ! -z "$PUB_KEY" ]; then
-            echo "$PUB_KEY" >> /home/$NEW_USER/.ssh/authorized_keys
-            chmod 700 /home/$NEW_USER/.ssh
-            chmod 600 /home/$NEW_USER/.ssh/authorized_keys
-            chown -R $NEW_USER:$NEW_USER /home/$NEW_USER/.ssh
-        fi
-        echo -e "${GREEN}   User created.${NC}"
-    fi
-}
-
-run_task_3() {
-    echo -e "${YELLOW}>> Hardening SSH...${NC}"
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-    sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-    sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-    sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-    sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-    systemctl restart ssh
-}
-
-run_task_4() {
-    echo -e "${YELLOW}>> Configuring Firewall...${NC}"
-    ufw default deny incoming
-    ufw default allow outgoing
-    ufw allow ssh
-    ufw allow http
-    ufw allow https
-    echo "y" | ufw enable >/dev/null
-}
-
-run_task_5() {
-    echo -e "${YELLOW}>> Installing Fail2Ban...${NC}"
-    apt-get install fail2ban -y -qq
-    cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-    systemctl enable fail2ban --now
-}
-
-run_task_6() {
-    echo -e "${YELLOW}>> Setting Timezone...${NC}"
-    timedatectl set-timezone Asia/Jakarta
-}
-
-run_task_7() {
-    echo -e "${YELLOW}>> Calculating Swap...${NC}"
-    if swapon --show | grep -q "file"; then echo "Swap exists."; return; fi
-    TOTAL_RAM=$(free -m | awk '/Mem:/ {print $2}')
-    SWAP_SIZE=$((TOTAL_RAM * 2))
-    echo "   Creating ${SWAP_SIZE}MB Swap..."
-    fallocate -l "${SWAP_SIZE}M" /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_SIZE status=none
-    chmod 600 /swapfile
-    mkswap /swapfile
-    swapon /swapfile
-    if ! grep -q "/swapfile" /etc/fstab; then echo '/swapfile none swap sw 0 0' >> /etc/fstab; fi
-}
-
-# --- MAIN LOOP ---
-
-# Check Root
-if [[ $EUID -ne 0 ]]; then echo -e "${RED}Run as Root!${NC}"; exit 1; fi
-
-while true; do
-    refresh_status
-    header
-    
-    # Print Table
-    for i in {1..7}; do
-        # Determine Checkbox
-        if [ "${SELECTED[$i]}" = true ]; then
-            CHECKBOX="${GREEN}[X]${NC}"
-            ROW_COLOR="${BOLD}"
-        else
-            CHECKBOX="[ ]"
-            ROW_COLOR=""
-        fi
-        
-        # Determine Status Symbol
-        STAT_SYM=$(get_status_symbol "${STATUS[$i]}")
-        
-        printf "   %s%2d  | %-11s |  %s   | %s%s\n" "$ROW_COLOR" "$i" "$STAT_SYM" "$CHECKBOX" "${TASKS[$i]}" "${NC}"
-    done
-    
-    echo -e "${BLUE}------------------------------------------------------------${NC}"
-    echo -e "   Controls: Type ${BOLD}number${NC} to toggle, ${BOLD}'a'${NC} for all, ${BOLD}'r'${NC} to run."
-    echo -e "${BLUE}------------------------------------------------------------${NC}"
-    
-    read -p "   Your Choice > " CHOICE
-    
-    case "$CHOICE" in
-        [1-7])
-            if [ "${SELECTED[$CHOICE]}" = true ]; then
-                SELECTED[$CHOICE]=false
+for TASK in $SELECTION; do
+    case "$TASK" in
+        1)
+            echo -e "${YELLOW}>> [1/7] Updating System...${RESET}"
+            apt-get update -qq && apt-get upgrade -y -qq
+            touch /var/lib/apt/periodic/update-success-stamp
+            echo -e "${GREEN}   Selesai.${RESET}"
+            ;;
+        2)
+            echo -e "${YELLOW}>> [2/7] Setup User...${RESET}"
+            read -p "   Username baru: " NEW_USER
+            if id "$NEW_USER" &>/dev/null; then
+                echo -e "${RED}   User sudah ada.${RESET}"
             else
-                SELECTED[$CHOICE]=true
+                adduser --gecos "" "$NEW_USER" > /dev/null
+                usermod -aG sudo "$NEW_USER"
+                mkdir -p /home/$NEW_USER/.ssh
+                echo -e "${CYAN}   Paste SSH Public Key (Enter jika tidak ada):${RESET}"
+                read -r PUB_KEY
+                if [ ! -z "$PUB_KEY" ]; then
+                    echo "$PUB_KEY" >> /home/$NEW_USER/.ssh/authorized_keys
+                    chmod 700 /home/$NEW_USER/.ssh
+                    chmod 600 /home/$NEW_USER/.ssh/authorized_keys
+                    chown -R $NEW_USER:$NEW_USER /home/$NEW_USER/.ssh
+                fi
+                echo -e "${GREEN}   User dibuat.${RESET}"
             fi
             ;;
-        "a"|"A")
-            for i in {1..7}; do SELECTED[$i]=true; done
+        3)
+            echo -e "${YELLOW}>> [3/7] Hardening SSH...${RESET}"
+            cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+            sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+            sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+            sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+            sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+            systemctl restart ssh
+            echo -e "${GREEN}   SSH diamankan (Root Login & Pass Auth OFF).${RESET}"
             ;;
-        "c"|"C")
-             for i in {1..7}; do SELECTED[$i]=false; done
-             ;;
-        "r"|"R")
-            echo ""
-            echo -e "${GREEN}=== STARTING EXECUTION ===${NC}"
-            for i in {1..7}; do
-                if [ "${SELECTED[$i]}" = true ]; then
-                    case $i in
-                        1) run_task_1 ;;
-                        2) run_task_2 ;;
-                        3) run_task_3 ;;
-                        4) run_task_4 ;;
-                        5) run_task_5 ;;
-                        6) run_task_6 ;;
-                        7) run_task_7 ;;
-                    esac
-                    log "Task $i executed."
-                fi
-            done
-            echo -e "${GREEN}=== ALL DONE. Press Enter to exit. ===${NC}"
-            read
-            clear
-            exit 0
+        4)
+            echo -e "${YELLOW}>> [4/7] Config Firewall...${RESET}"
+            ufw default deny incoming > /dev/null
+            ufw default allow outgoing > /dev/null
+            ufw allow ssh > /dev/null
+            ufw allow http > /dev/null
+            ufw allow https > /dev/null
+            echo "y" | ufw enable > /dev/null
+            echo -e "${GREEN}   UFW Aktif.${RESET}"
             ;;
-        "q"|"Q")
-            clear
-            exit 0
+        5)
+            echo -e "${YELLOW}>> [5/7] Installing Fail2Ban...${RESET}"
+            apt-get install fail2ban -y -qq > /dev/null
+            cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+            systemctl enable fail2ban --now > /dev/null
+            echo -e "${GREEN}   Fail2Ban Aktif.${RESET}"
             ;;
-        *)
+        6)
+            echo -e "${YELLOW}>> [6/7] Setting Timezone...${RESET}"
+            timedatectl set-timezone Asia/Jakarta
+            echo -e "${GREEN}   Timezone: WIB.${RESET}"
+            ;;
+        7)
+            echo -e "${YELLOW}>> [7/7] Checking Swap...${RESET}"
+            if swapon --show | grep -q "file"; then
+                echo -e "${GREEN}   Swap sudah ada.${RESET}"
+            else
+                RAM=$(free -m | awk '/Mem:/ {print $2}')
+                SWAP=$((RAM * 2))
+                echo "   Membuat Swap ${SWAP}MB..."
+                fallocate -l "${SWAP}M" /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$SWAP status=none
+                chmod 600 /swapfile
+                mkswap /swapfile > /dev/null
+                swapon /swapfile
+                if ! grep -q "/swapfile" /etc/fstab; then echo '/swapfile none swap sw 0 0' >> /etc/fstab; fi
+                echo -e "${GREEN}   Swap Aktif.${RESET}"
+            fi
             ;;
     esac
 done
+
+echo ""
+echo -e "${BLUE}──────────────────────────────────────────────${RESET}"
+echo -e "${BOLD} ✅ Setup Selesai!${RESET}"
