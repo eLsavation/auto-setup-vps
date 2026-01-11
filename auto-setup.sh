@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V17 - UNIVERSAL MULTI-DISTRO)
+# SERVER SETUP AUTOMATION (V18 - SILENT & CLEAN)
 # Author: github.com/eLsavation
-# Supported: Ubuntu, Debian, CentOS, RHEL, Alma, Rocky
 # ==========================================================
 
 # --- 1. ROOT CHECK ---
@@ -25,22 +24,21 @@ fi
 # Set Package Manager & Firewall Command
 if [[ "$OS" == "ubuntu" || "$OS" == "debian" || "$OS" == "kali" || "$OS" == "linuxmint" ]]; then
     PKG_MGR="apt-get"
-    INSTALL_CMD="apt-get install -y"
-    UPDATE_CMD="apt-get update -y && apt-get upgrade -y"
+    # Menggunakan -qq (very quiet) untuk update
+    INSTALL_CMD="apt-get install -y -qq"
+    UPDATE_CMD="apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq"
     FIREWALL_TYPE="ufw"
     SSH_SERVICE="ssh"
 elif [[ "$OS" == "centos" || "$OS" == "rhel" || "$OS" == "almalinux" || "$OS" == "rocky" || "$OS" == "fedora" ]]; then
     PKG_MGR="dnf"
-    # Fallback to yum if dnf not found
     if ! command -v dnf &> /dev/null; then PKG_MGR="yum"; fi
-    INSTALL_CMD="$PKG_MGR install -y"
-    UPDATE_CMD="$PKG_MGR update -y"
+    INSTALL_CMD="$PKG_MGR install -y -q"
+    UPDATE_CMD="$PKG_MGR update -y -q"
     FIREWALL_TYPE="firewalld"
     SSH_SERVICE="sshd"
 else
-    echo "OS $OS not explicitly supported, but trying best effort..."
-    PKG_MGR="apt-get" # Default fallback
-    INSTALL_CMD="apt-get install -y"
+    PKG_MGR="apt-get"
+    INSTALL_CMD="apt-get install -y -qq"
     FIREWALL_TYPE="ufw"
     SSH_SERVICE="ssh"
 fi
@@ -84,7 +82,6 @@ get_fw_val() {
         if ! command -v firewall-cmd &> /dev/null; then echo "Missing"; return; fi
         if firewall-cmd --state &>/dev/null; then
             PORTS=$(firewall-cmd --list-ports | tr ' ' ',')
-            SERVICES=$(firewall-cmd --list-services | tr ' ' ',')
             echo "${GREEN}Active${RESET} [${PORTS:-Default}]"
         else echo "${RED}Inactive${RESET}"; fi
     fi
@@ -102,7 +99,6 @@ is_updated() {
     if [[ "$PKG_MGR" == "apt-get" ]]; then
         [ -f /var/lib/apt/periodic/update-success-stamp ] && find /var/lib/apt/periodic/update-success-stamp -mtime -1 2>/dev/null | grep -q .
     else
-        # For RPM based, just assume false unless manually checked or complex logic
         return 1 
     fi
 }
@@ -127,8 +123,9 @@ draw_header() {
     CPU_CORES=$(nproc)
     AUTHOR="github.com/eLsavation"
 
+    # [CLEAN] Removed Version Number
     printf "${CYAN}╔═════════════════════════════════════════════════════════════════╗${RESET}\n"
-    printf "${CYAN}║${RESET} ${BOLD}${WHITE}%-44s${RESET} ${DIM}%20s${RESET} ${CYAN}║${RESET}\n" "VPS AUTO SETUP WIZARD" "v17 ($OS)"
+    printf "${CYAN}║${RESET}   ${BOLD}${WHITE}%-62s${RESET}   ${CYAN}║${RESET}\n" "VPS AUTO SETUP WIZARD"
     printf "${CYAN}╠═════════════════════════════════════════════════════════════════╣${RESET}\n"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Author" "$AUTHOR"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Hostname" "$MY_HOST"
@@ -181,8 +178,18 @@ while true; do
                 ;;
             2)
                 echo -e "  ${CYAN}>> Updating System ($PKG_MGR)...${RESET}"
-                eval "$UPDATE_CMD >/dev/null 2>&1"
-                if [[ "$PKG_MGR" == "apt-get" ]]; then touch /var/lib/apt/periodic/update-success-stamp; fi
+                echo -e "     ${DIM}Please wait, processing updates in background...${RESET}"
+                
+                # [SILENT MODE] Menggunakan redirection ke /dev/null
+                if [[ "$PKG_MGR" == "apt-get" ]]; then
+                    apt-get update -qq >/dev/null 2>&1
+                    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq >/dev/null 2>&1
+                    touch /var/lib/apt/periodic/update-success-stamp
+                else
+                    # Untuk CentOS/RHEL
+                    $UPDATE_CMD >/dev/null 2>&1
+                fi
+                
                 echo -e "     ${GREEN}Success.${RESET}"
                 ;;
             3)
@@ -194,10 +201,9 @@ while true; do
                     if command -v adduser &>/dev/null; then
                          adduser --disabled-password --gecos "" "$NEW_USER" >/dev/null 2>&1
                     else
-                         useradd -m -s /bin/bash "$NEW_USER" # Fallback for CentOS
+                         useradd -m -s /bin/bash "$NEW_USER"
                     fi
                     
-                    # Add to sudo/wheel
                     if getent group sudo &>/dev/null; then usermod -aG sudo "$NEW_USER"; fi
                     if getent group wheel &>/dev/null; then usermod -aG wheel "$NEW_USER"; fi
                     
@@ -212,7 +218,6 @@ while true; do
                         chmod 700 /home/$NEW_USER/.ssh
                         chmod 600 /home/$NEW_USER/.ssh/authorized_keys
                         chown -R $NEW_USER:$NEW_USER /home/$NEW_USER/.ssh
-                        # SELinux Fix for SSH Keys (CentOS)
                         if command -v restorecon &>/dev/null; then restorecon -R -v /home/$NEW_USER/.ssh >/dev/null 2>&1; fi
                     fi
                     echo -e "     ${GREEN}Created.${RESET}"
@@ -220,7 +225,6 @@ while true; do
                 ;;
             4)
                 echo -e "  ${CYAN}>> SSH Hardening...${RESET}"
-                # Install openssh if missing
                 if [ ! -f /etc/ssh/sshd_config ]; then $INSTALL_CMD openssh-server >/dev/null 2>&1; fi
                 
                 cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null
@@ -235,23 +239,22 @@ while true; do
                 sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
                 sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
                 
-                # Fix Ubuntu Socket
                 if systemctl is-active --quiet ssh.socket; then
                     systemctl stop ssh.socket >/dev/null 2>&1
                     systemctl disable ssh.socket >/dev/null 2>&1
+                    systemctl unmask ssh.service >/dev/null 2>&1
                 fi
                 
-                # Fix CentOS SELinux for custom port
                 if command -v semanage &>/dev/null && [[ "$SSH_PORT" != "22" ]]; then
-                     echo -e "     ${YELLOW}Updating SELinux for Port $SSH_PORT...${RESET}"
+                     echo -e "     ${YELLOW}Updating SELinux...${RESET}"
                      semanage port -a -t ssh_port_t -p tcp $SSH_PORT >/dev/null 2>&1
                 fi
                 
-                # Fix /run/sshd
                 mkdir -p /run/sshd; chmod 0755 /run/sshd
                 
                 echo -e "     ${YELLOW}Restarting SSH...${RESET}"
                 if sshd -t; then
+                    systemctl enable "$SSH_SERVICE" >/dev/null 2>&1
                     systemctl restart "$SSH_SERVICE" >/dev/null 2>&1
                     echo -e "     ${GREEN}Success on Port $SSH_PORT.${RESET}"
                 else
