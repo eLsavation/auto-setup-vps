@@ -1,26 +1,26 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (LITE & AESTHETIC)
+# SERVER SETUP AUTOMATION (V12 - FIX TAMPILAN)
 # ==========================================================
 
 # --- 1. ROOT CHECK ---
 if [[ $EUID -ne 0 ]]; then
-   echo -e "\n\e[31m[ERROR] Script must be run as ROOT.\e[0m\n"
+   echo "Error: Script must be run as ROOT."
    exit 1
 fi
 
-# --- 2. STYLING VARS ---
-BOLD="\e[1m"
-DIM="\e[2m"
-RED="\e[31m"
-GREEN="\e[32m"
-YELLOW="\e[33m"
-BLUE="\e[34m"
-CYAN="\e[36m"
-MAGENTA="\e[35m"
-WHITE="\e[97m"
-RESET="\e[0m"
+# --- 2. STYLING VARS (FIXED ANSI FORMAT) ---
+# Menggunakan $'\033...' memastikan bash membacanya sebagai warna, bukan teks.
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+RED=$'\033[31m'
+GREEN=$'\033[32m'
+YELLOW=$'\033[33m'
+BLUE=$'\033[34m'
+CYAN=$'\033[36m'
+WHITE=$'\033[97m'
+RESET=$'\033[0m'
 
 # Icons
 ICON_OK="${GREEN}●${RESET}"
@@ -102,8 +102,9 @@ draw_header() {
 }
 
 draw_row() {
-    # $1=ID, $2=Icon, $3=Task, $4=Detail
-    printf "  ${BOLD}%-2s${RESET}  %b  ${WHITE}%-20s${RESET}  %-30s\n" "$1" "$2" "$3" "$4"
+    # Format: ID | Icon | Task Name | Status Detail
+    # Menggunakan %b agar escape color code terbaca dengan benar
+    printf "  ${BOLD}%-2s${RESET}  %b  ${WHITE}%-20s${RESET}  %b\n" "$1" "$2" "$3" "$4"
 }
 
 # --- 6. MAIN LOOP ---
