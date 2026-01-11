@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V1 - CLEAN & FIXED)
+# SERVER SETUP AUTOMATION (V1 - FINAL)
 # Author: github.com/eLsavation
 # ==========================================================
 
@@ -174,11 +174,11 @@ while true; do
                 if id "$NEW_USER" &>/dev/null; then
                     echo -e "     ${RED}User exists.${RESET}"
                 else
-                    # 1. Buat user tanpa prompt password (agar tidak stuck)
+                    # [Clean] Add user silent (no password prompt yet)
                     adduser --disabled-password --gecos "" "$NEW_USER" >/dev/null 2>&1
                     usermod -aG sudo "$NEW_USER"
                     
-                    # 2. Minta password secara eksplisit (Note dihapus)
+                    # [Clean] Set Password Interactively (Note dihapus)
                     echo -e "     ${YELLOW}Set Password for $NEW_USER:${RESET}"
                     passwd "$NEW_USER"
                     
@@ -205,8 +205,11 @@ while true; do
                 sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
                 sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
                 sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+                
+                # RESTART SSH AGAR CONFIG BERUBAH
                 systemctl restart ssh >/dev/null 2>&1
-                echo -e "     ${GREEN}Secured on Port $SSH_PORT.${RESET}"
+                
+                echo -e "     ${GREEN}Secured & Service Restarted on Port $SSH_PORT.${RESET}"
                 ;;
             5)
                 echo -e "  ${CYAN}>> Configuring UFW...${RESET}"
