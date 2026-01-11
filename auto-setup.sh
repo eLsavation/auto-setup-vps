@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V13 - SPECS & SWAP)
+# SERVER SETUP AUTOMATION (V14 - BRANDED BANNER)
+# Author: github.com/eLsavation
 # ==========================================================
 
 # --- 1. ROOT CHECK ---
@@ -10,7 +11,7 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# --- 2. STYLING VARS (ANSI FIX) ---
+# --- 2. STYLING VARS ---
 BOLD=$'\033[1m'
 DIM=$'\033[2m'
 RED=$'\033[31m'
@@ -18,6 +19,7 @@ GREEN=$'\033[32m'
 YELLOW=$'\033[33m'
 BLUE=$'\033[34m'
 CYAN=$'\033[36m'
+MAGENTA=$'\033[35m'
 WHITE=$'\033[97m'
 RESET=$'\033[0m'
 
@@ -26,7 +28,7 @@ ICON_OK="${GREEN}●${RESET}"
 ICON_NO="${RED}○${RESET}"
 ARROW="${CYAN}➜${RESET}"
 
-# --- 3. LOGIC & STATUS FUNCTIONS ---
+# --- 3. STATUS FUNCTIONS ---
 
 get_hostname_val() { echo "$(hostname)"; }
 
@@ -74,9 +76,7 @@ get_swap_val() {
     if swapon --show | grep -q "file"; then
         SIZE=$(free -h | awk '/Swap:/ {print $2}')
         echo "${GREEN}Active${RESET} ($SIZE)"
-    else
-        echo "${RED}No Swap${RESET}"
-    fi
+    else echo "${RED}No Swap${RESET}"; fi
 }
 
 # --- 4. CHECK BOOLEANS ---
@@ -91,34 +91,30 @@ is_swap_ok() { swapon --show --noheadings 2>/dev/null | grep -q "."; }
 
 stat_icon() { if $1; then echo -e "$ICON_OK"; else echo -e "$ICON_NO"; fi; }
 
-# --- 5. UI COMPONENTS ---
+# --- 5. UI COMPONENTS (NEW BANNER) ---
 
 draw_line() { echo -e "${DIM}────────────────────────────────────────────────────────────────────────${RESET}"; }
 
 draw_header() {
     clear
-    echo -e "${BOLD}${CYAN}"
-    echo "  SERVER CONFIGURATION DASHBOARD"
-    echo -e "${RESET}"
-    
-    # System Info
+    # System Info for Banner
     IP=$(hostname -I | cut -d' ' -f1)
-    OS=$(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)
-    
-    # Get RAM & CPU Specs
+    OS_SHORT=$(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2 | cut -d' ' -f1,2)
     RAM_TOTAL=$(free -h | awk '/Mem:/ {print $2}')
     CPU_CORES=$(nproc)
-    
-    # Draw Info Box
-    echo -e "  HOST : ${WHITE}$(hostname)${RESET}"
-    echo -e "  IP   : ${WHITE}$IP${RESET}"
-    echo -e "  OS   : ${WHITE}$OS${RESET}"
-    echo -e "  SPEC : ${WHITE}${CPU_CORES} vCPU${RESET} | ${WHITE}${RAM_TOTAL} RAM${RESET}"
+
+    # BRANDED BANNER
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${CYAN}║${RESET}   ${BOLD}${WHITE}VPS AUTO SETUP WIZARD${RESET}                                ${DIM}v14.0 (Pro)${RESET}   ${CYAN}║${RESET}"
+    echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════╣${RESET}"
+    echo -e "${CYAN}║${RESET}   ${YELLOW}${BOLD}Author${RESET}  : github.com/eLsavation                                  ${CYAN}║${RESET}"
+    echo -e "${CYAN}║${RESET}   ${YELLOW}System${RESET}  : $OS_SHORT ($IP)                           ${CYAN}║${RESET}"
+    echo -e "${CYAN}║${RESET}   ${YELLOW}Specs${RESET}   : ${WHITE}${CPU_CORES} vCPU${RESET} / ${WHITE}${RAM_TOTAL} RAM${RESET}                                   ${CYAN}║${RESET}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════╝${RESET}"
     echo ""
 }
 
 draw_row() {
-    # Format: ID | Icon | Task Name | Status Detail
     printf "  ${BOLD}%-2s${RESET}  %b  ${WHITE}%-20s${RESET}  %b\n" "$1" "$2" "$3" "$4"
 }
 
@@ -130,7 +126,6 @@ while true; do
     echo -e "  ${DIM}ID  ST  TASK                  CURRENT STATE${RESET}"
     draw_line
 
-    # MENU ITEMS
     draw_row "1" "$(stat_icon is_hostname_set)" "Hostname" "$(get_hostname_val)"
     draw_row "2" "$(stat_icon is_updated)" "System Update" "$(get_update_val)"
     draw_row "3" "$(stat_icon is_user_ok)" "Sudo User" "$(get_user_val)"
@@ -147,7 +142,7 @@ while true; do
     
     read -p "  $ARROW Select ID (e.g., 1 4 8): " SELECTION
 
-    if [[ "$SELECTION" == "q" ]]; then echo -e "\n  ${GREEN}Done.${RESET}\n"; break; fi
+    if [[ "$SELECTION" == "q" ]]; then echo -e "\n  ${GREEN}Setup Completed. Bye!${RESET}\n"; break; fi
     if [[ "$SELECTION" == "a" ]]; then SELECTION="1 2 3 4 5 6 7 8"; fi
     echo ""
 
@@ -234,23 +229,15 @@ while true; do
                 if swapon --show | grep -q "file"; then
                     echo -e "     ${YELLOW}Swap already exists.${RESET}"
                 else
-                    # 1. Ambil RAM (MB)
                     RAM_MB=$(free -m | awk '/Mem:/ {print $2}')
-                    # 2. Kali 2
                     SWAP_MB=$((RAM_MB * 2))
-                    
-                    echo -e "     RAM: ${RAM_MB}MB. Creating Swap: ${SWAP_MB}MB..."
-                    
-                    # 3. Create file (fallback to dd if fallocate fails)
+                    echo -e "     Target: ${SWAP_MB}MB..."
                     fallocate -l "${SWAP_MB}M" /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_MB status=none
-                    
                     chmod 600 /swapfile
                     mkswap /swapfile >/dev/null 2>&1
                     swapon /swapfile >/dev/null 2>&1
-                    
-                    # 4. Fstab
                     if ! grep -q "/swapfile" /etc/fstab; then echo '/swapfile none swap sw 0 0' >> /etc/fstab; fi
-                    echo -e "     ${GREEN}Swap Created.${RESET}"
+                    echo -e "     ${GREEN}Created.${RESET}"
                 fi
                 ;;
         esac
