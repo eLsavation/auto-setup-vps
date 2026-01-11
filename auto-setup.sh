@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V15 - ULTIMATE BANNER)
+# SERVER SETUP AUTOMATION (V1 - FIXED BANNER)
 # Author: github.com/eLsavation
 # ==========================================================
 
@@ -56,7 +56,8 @@ get_ssh_val() {
 get_fw_val() {
     if ! command -v ufw &> /dev/null; then echo "Missing"; return; fi
     if ufw status | grep -q "Status: active"; then
-        PORTS=$(ufw status | grep "ALLOW" | grep -v "(v6)" | awk -F"/" '{print $1}' | sort -nu | tr '\n' ',' | sed 's/,$//')
+        # Ambil port TCP saja, hilangkan v6, sort unik, gabung pakai koma
+        PORTS=$(ufw status | grep "ALLOW" | grep "/tcp" | grep -v "(v6)" | awk -F"/" '{print $1}' | sort -nu | tr '\n' ',' | sed 's/,$//')
         echo "${GREEN}Active${RESET} [${PORTS:-None}]"
     else echo "${RED}Inactive${RESET}"; fi
 }
@@ -92,7 +93,7 @@ is_swap_ok() { swapon --show --noheadings 2>/dev/null | grep -q "."; }
 
 stat_icon() { if $1; then echo -e "$ICON_OK"; else echo -e "$ICON_NO"; fi; }
 
-# --- 5. UI COMPONENTS (FULL INFO BANNER) ---
+# --- 5. UI COMPONENTS (FIXED ALIGNMENT BANNER) ---
 
 draw_line() { echo -e "${DIM}────────────────────────────────────────────────────────────────────────${RESET}"; }
 
@@ -102,28 +103,34 @@ draw_header() {
     MY_HOST=$(hostname)
     MY_IP=$(hostname -I | cut -d' ' -f1)
     MY_OS=$(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)
-    # Potong nama OS jika terlalu panjang agar tabel tidak rusak
-    if [ ${#MY_OS} -gt 45 ]; then MY_OS="${MY_OS:0:42}..."; fi
+    # Truncate long OS names to prevent breaking layout
+    if [ ${#MY_OS} -gt 48 ]; then MY_OS="${MY_OS:0:45}..."; fi
     
     RAM_TOTAL=$(free -h | awk '/Mem:/ {print $2}')
     CPU_CORES=$(nproc)
     AUTHOR="github.com/eLsavation"
 
-    # Draw Box with Printf for alignment
-    echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════╗${RESET}"
-    echo -e "${CYAN}║${RESET}   ${BOLD}${WHITE}VPS AUTO SETUP WIZARD${RESET}                                ${DIM}v15.0 (Pro)${RESET}   ${CYAN}║${RESET}"
-    echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════╣${RESET}"
+    # BANNER WITH FIXED WIDTH PRINTF
+    # Total inner width used is 65 chars to ensure alignment.
+
+    # Top Border
+    printf "${CYAN}╔═════════════════════════════════════════════════════════════════╗${RESET}\n"
     
-    # Format: Border | Label (Yellow) : Value (White) | Border
-    # %-10s = Label rata kiri lebar 10
-    # %-50s = Value rata kiri lebar 50
-    printf "${CYAN}║${RESET}   ${YELLOW}%-10s${RESET} : %-50s ${CYAN}║${RESET}\n" "Author" "$AUTHOR"
-    printf "${CYAN}║${RESET}   ${YELLOW}%-10s${RESET} : %-50s ${CYAN}║${RESET}\n" "Hostname" "$MY_HOST"
-    printf "${CYAN}║${RESET}   ${YELLOW}%-10s${RESET} : %-50s ${CYAN}║${RESET}\n" "IP Addr" "$MY_IP"
-    printf "${CYAN}║${RESET}   ${YELLOW}%-10s${RESET} : %-50s ${CYAN}║${RESET}\n" "OS System" "$MY_OS"
-    printf "${CYAN}║${RESET}   ${YELLOW}%-10s${RESET} : %-50s ${CYAN}║${RESET}\n" "Specs" "${CPU_CORES} vCPU / ${RAM_TOTAL} RAM"
+    # Title Line: Title left aligned (-45s), Version right aligned (20s)
+    printf "${CYAN}║${RESET} ${BOLD}${WHITE}%-44s${RESET} ${DIM}%20s${RESET} ${CYAN}║${RESET}\n" "VPS AUTO SETUP WIZARD" "v1"
     
-    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════╝${RESET}"
+    # Separator
+    printf "${CYAN}╠═════════════════════════════════════════════════════════════════╣${RESET}\n"
+    
+    # Content Lines: Label fixed 10 chars, Value fixed 50 chars.
+    printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Author" "$AUTHOR"
+    printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Hostname" "$MY_HOST"
+    printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "IP Addr" "$MY_IP"
+    printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "OS System" "$MY_OS"
+    printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Specs" "${CPU_CORES} vCPU / ${RAM_TOTAL} RAM"
+    
+    # Bottom Border
+    printf "${CYAN}╚═════════════════════════════════════════════════════════════════╝${RESET}\n"
     echo ""
 }
 
