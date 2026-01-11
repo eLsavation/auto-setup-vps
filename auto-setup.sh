@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V1 - FINAL)
+# SERVER SETUP AUTOMATION (V2 - SSH FIX & VALIDATOR)
 # Author: github.com/eLsavation
 # ==========================================================
 
@@ -19,7 +19,6 @@ GREEN=$'\033[32m'
 YELLOW=$'\033[33m'
 BLUE=$'\033[34m'
 CYAN=$'\033[36m'
-MAGENTA=$'\033[35m'
 WHITE=$'\033[97m'
 RESET=$'\033[0m'
 
@@ -105,9 +104,8 @@ draw_header() {
     CPU_CORES=$(nproc)
     AUTHOR="github.com/eLsavation"
 
-    # FIXED WIDTH BANNER
     printf "${CYAN}╔═════════════════════════════════════════════════════════════════╗${RESET}\n"
-    printf "${CYAN}║${RESET} ${BOLD}${WHITE}%-44s${RESET} ${DIM}%20s${RESET} ${CYAN}║${RESET}\n" "VPS AUTO SETUP WIZARD" "v1"
+    printf "${CYAN}║${RESET} ${BOLD}${WHITE}%-44s${RESET} ${DIM}%20s${RESET} ${CYAN}║${RESET}\n" "VPS AUTO SETUP WIZARD" "v2"
     printf "${CYAN}╠═════════════════════════════════════════════════════════════════╣${RESET}\n"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Author" "$AUTHOR"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Hostname" "$MY_HOST"
@@ -174,14 +172,10 @@ while true; do
                 if id "$NEW_USER" &>/dev/null; then
                     echo -e "     ${RED}User exists.${RESET}"
                 else
-                    # [Clean] Add user silent (no password prompt yet)
                     adduser --disabled-password --gecos "" "$NEW_USER" >/dev/null 2>&1
                     usermod -aG sudo "$NEW_USER"
-                    
-                    # [Clean] Set Password Interactively (Note dihapus)
                     echo -e "     ${YELLOW}Set Password for $NEW_USER:${RESET}"
                     passwd "$NEW_USER"
-                    
                     mkdir -p /home/$NEW_USER/.ssh
                     echo -e "     ${DIM}Paste PubKey (Enter to skip):${RESET}"
                     read -r PUB_KEY
@@ -197,19 +191,48 @@ while true; do
             4)
                 echo -e "  ${CYAN}>> SSH Hardening...${RESET}"
                 if [ ! -f /etc/ssh/sshd_config ]; then apt-get install openssh-server -y >/dev/null 2>&1; fi
+                
+                # Backup config
                 cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null
+                
                 read -p "     Port [22]: " SSH_PORT
                 SSH_PORT=${SSH_PORT:-22}
-                sed -i "s/^#\?Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
+                
+                # Clean up old port settings first (prevent duplicate port lines)
+                sed -i '/^Port/d' /etc/ssh/sshd_config
+                sed -i '/^#Port/d' /etc/ssh/sshd_config
+                
+                # Insert new configs
+                echo "Port $SSH_PORT" >> /etc/ssh/sshd_config
                 sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
                 sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
                 sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
                 sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
                 
-                # RESTART SSH AGAR CONFIG BERUBAH
-                systemctl restart ssh >/dev/null 2>&1
-                
-                echo -e "     ${GREEN}Secured & Service Restarted on Port $SSH_PORT.${RESET}"
+                # VALIDATE CONFIG BEFORE RESTART
+                echo -e "     ${YELLOW}Validating SSH config...${RESET}"
+                if sshd -t; then
+                    echo -e "     ${GREEN}Config OK. Restarting SSH...${RESET}"
+                    
+                    # Try restarting both common service names
+                    systemctl restart sshd >/dev/null 2>&1
+                    systemctl restart ssh >/dev/null 2>&1
+                    
+                    # LIVE CHECK
+                    sleep 2
+                    if command -v ss &> /dev/null; then
+                        CHECK_PORT=$(ss -tulpn | grep ssh | awk '{print $5}' | cut -d: -f2 | head -n 1)
+                    else
+                        CHECK_PORT=$(netstat -tulpn | grep ssh | awk '{print $4}' | cut -d: -f2 | head -n 1)
+                    fi
+                    
+                    echo -e "     ${GREEN}Success! SSH Listening on Port: ${CHECK_PORT:-Unknown}${RESET}"
+                else
+                    echo -e "     ${RED}Config Error! Reverting to backup...${RESET}"
+                    cp /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
+                    systemctl restart ssh
+                    echo -e "     ${RED}Failed. Please check /etc/ssh/sshd_config manually.${RESET}"
+                fi
                 ;;
             5)
                 echo -e "  ${CYAN}>> Configuring UFW...${RESET}"
