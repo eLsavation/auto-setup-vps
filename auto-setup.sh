@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V12 - FIX TAMPILAN)
+# SERVER SETUP AUTOMATION (V13 - SPECS & SWAP)
 # ==========================================================
 
 # --- 1. ROOT CHECK ---
@@ -10,8 +10,7 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# --- 2. STYLING VARS (FIXED ANSI FORMAT) ---
-# Menggunakan $'\033...' memastikan bash membacanya sebagai warna, bukan teks.
+# --- 2. STYLING VARS (ANSI FIX) ---
 BOLD=$'\033[1m'
 DIM=$'\033[2m'
 RED=$'\033[31m'
@@ -71,6 +70,15 @@ get_autoupdate_val() {
         echo "${GREEN}Enabled${RESET}"; else echo "${DIM}Disabled${RESET}"; fi
 }
 
+get_swap_val() {
+    if swapon --show | grep -q "file"; then
+        SIZE=$(free -h | awk '/Swap:/ {print $2}')
+        echo "${GREEN}Active${RESET} ($SIZE)"
+    else
+        echo "${RED}No Swap${RESET}"
+    fi
+}
+
 # --- 4. CHECK BOOLEANS ---
 is_hostname_set() { [ "$(hostname)" != "ubuntu" ]; }
 is_updated() { [ -f /var/lib/apt/periodic/update-success-stamp ] && find /var/lib/apt/periodic/update-success-stamp -mtime -1 2>/dev/null | grep -q .; }
@@ -79,6 +87,7 @@ is_ssh_ok()  { [ -f /etc/ssh/sshd_config ] && grep -q "^PasswordAuthentication n
 is_fw_ok()   { command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; }
 is_f2b_ok()  { systemctl is-active --quiet fail2ban 2>/dev/null; }
 is_auto_ok() { [ -f /etc/apt/apt.conf.d/20auto-upgrades ] && grep -q "1" /etc/apt/apt.conf.d/20auto-upgrades; }
+is_swap_ok() { swapon --show --noheadings 2>/dev/null | grep -q "."; }
 
 stat_icon() { if $1; then echo -e "$ICON_OK"; else echo -e "$ICON_NO"; fi; }
 
@@ -92,18 +101,24 @@ draw_header() {
     echo "  SERVER CONFIGURATION DASHBOARD"
     echo -e "${RESET}"
     
-    # Simple System Info
+    # System Info
     IP=$(hostname -I | cut -d' ' -f1)
     OS=$(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)
+    
+    # Get RAM & CPU Specs
+    RAM_TOTAL=$(free -h | awk '/Mem:/ {print $2}')
+    CPU_CORES=$(nproc)
+    
+    # Draw Info Box
     echo -e "  HOST : ${WHITE}$(hostname)${RESET}"
     echo -e "  IP   : ${WHITE}$IP${RESET}"
     echo -e "  OS   : ${WHITE}$OS${RESET}"
+    echo -e "  SPEC : ${WHITE}${CPU_CORES} vCPU${RESET} | ${WHITE}${RAM_TOTAL} RAM${RESET}"
     echo ""
 }
 
 draw_row() {
     # Format: ID | Icon | Task Name | Status Detail
-    # Menggunakan %b agar escape color code terbaca dengan benar
     printf "  ${BOLD}%-2s${RESET}  %b  ${WHITE}%-20s${RESET}  %b\n" "$1" "$2" "$3" "$4"
 }
 
@@ -123,16 +138,17 @@ while true; do
     draw_row "5" "$(stat_icon is_fw_ok)" "Firewall (UFW)" "$(get_fw_val)"
     draw_row "6" "$(stat_icon is_f2b_ok)" "Fail2Ban" "$(get_f2b_val)"
     draw_row "7" "$(stat_icon is_auto_ok)" "Auto Patching" "$(get_autoupdate_val)"
+    draw_row "8" "$(stat_icon is_swap_ok)" "Auto Swap (2x RAM)" "$(get_swap_val)"
 
     echo ""
     draw_line
     echo -e "  ${DIM}[q] Quit  |  [a] Select All${RESET}"
     echo ""
     
-    read -p "  $ARROW Select ID (e.g., 1 4 5): " SELECTION
+    read -p "  $ARROW Select ID (e.g., 1 4 8): " SELECTION
 
     if [[ "$SELECTION" == "q" ]]; then echo -e "\n  ${GREEN}Done.${RESET}\n"; break; fi
-    if [[ "$SELECTION" == "a" ]]; then SELECTION="1 2 3 4 5 6 7"; fi
+    if [[ "$SELECTION" == "a" ]]; then SELECTION="1 2 3 4 5 6 7 8"; fi
     echo ""
 
     # --- EXECUTION ---
@@ -212,6 +228,30 @@ while true; do
                 echo 'APT::Periodic::Update-Package-Lists "1";' > /etc/apt/apt.conf.d/20auto-upgrades
                 echo 'APT::Periodic::Unattended-Upgrade "1";' >> /etc/apt/apt.conf.d/20auto-upgrades
                 echo -e "     ${GREEN}Enabled.${RESET}"
+                ;;
+            8)
+                echo -e "  ${CYAN}>> Configuring Swap...${RESET}"
+                if swapon --show | grep -q "file"; then
+                    echo -e "     ${YELLOW}Swap already exists.${RESET}"
+                else
+                    # 1. Ambil RAM (MB)
+                    RAM_MB=$(free -m | awk '/Mem:/ {print $2}')
+                    # 2. Kali 2
+                    SWAP_MB=$((RAM_MB * 2))
+                    
+                    echo -e "     RAM: ${RAM_MB}MB. Creating Swap: ${SWAP_MB}MB..."
+                    
+                    # 3. Create file (fallback to dd if fallocate fails)
+                    fallocate -l "${SWAP_MB}M" /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_MB status=none
+                    
+                    chmod 600 /swapfile
+                    mkswap /swapfile >/dev/null 2>&1
+                    swapon /swapfile >/dev/null 2>&1
+                    
+                    # 4. Fstab
+                    if ! grep -q "/swapfile" /etc/fstab; then echo '/swapfile none swap sw 0 0' >> /etc/fstab; fi
+                    echo -e "     ${GREEN}Swap Created.${RESET}"
+                fi
                 ;;
         esac
     done
