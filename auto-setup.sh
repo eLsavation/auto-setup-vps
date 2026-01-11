@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# SERVER SETUP AUTOMATION (V1 - FIXED BANNER)
+# SERVER SETUP AUTOMATION (V1 - USER FIX)
 # Author: github.com/eLsavation
 # ==========================================================
 
@@ -12,7 +12,6 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # --- 2. STYLING VARS ---
-# ANSI Color Codes (Fixed for all terminals)
 BOLD=$'\033[1m'
 DIM=$'\033[2m'
 RED=$'\033[31m'
@@ -56,7 +55,6 @@ get_ssh_val() {
 get_fw_val() {
     if ! command -v ufw &> /dev/null; then echo "Missing"; return; fi
     if ufw status | grep -q "Status: active"; then
-        # Ambil port TCP saja, hilangkan v6, sort unik, gabung pakai koma
         PORTS=$(ufw status | grep "ALLOW" | grep "/tcp" | grep -v "(v6)" | awk -F"/" '{print $1}' | sort -nu | tr '\n' ',' | sed 's/,$//')
         echo "${GREEN}Active${RESET} [${PORTS:-None}]"
     else echo "${RED}Inactive${RESET}"; fi
@@ -93,43 +91,29 @@ is_swap_ok() { swapon --show --noheadings 2>/dev/null | grep -q "."; }
 
 stat_icon() { if $1; then echo -e "$ICON_OK"; else echo -e "$ICON_NO"; fi; }
 
-# --- 5. UI COMPONENTS (FIXED ALIGNMENT BANNER) ---
+# --- 5. UI COMPONENTS ---
 
 draw_line() { echo -e "${DIM}────────────────────────────────────────────────────────────────────────${RESET}"; }
 
 draw_header() {
     clear
-    # Gather Info
     MY_HOST=$(hostname)
     MY_IP=$(hostname -I | cut -d' ' -f1)
     MY_OS=$(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)
-    # Truncate long OS names to prevent breaking layout
     if [ ${#MY_OS} -gt 48 ]; then MY_OS="${MY_OS:0:45}..."; fi
-    
     RAM_TOTAL=$(free -h | awk '/Mem:/ {print $2}')
     CPU_CORES=$(nproc)
     AUTHOR="github.com/eLsavation"
 
-    # BANNER WITH FIXED WIDTH PRINTF
-    # Total inner width used is 65 chars to ensure alignment.
-
-    # Top Border
+    # FIXED WIDTH BANNER
     printf "${CYAN}╔═════════════════════════════════════════════════════════════════╗${RESET}\n"
-    
-    # Title Line: Title left aligned (-45s), Version right aligned (20s)
     printf "${CYAN}║${RESET} ${BOLD}${WHITE}%-44s${RESET} ${DIM}%20s${RESET} ${CYAN}║${RESET}\n" "VPS AUTO SETUP WIZARD" "v1"
-    
-    # Separator
     printf "${CYAN}╠═════════════════════════════════════════════════════════════════╣${RESET}\n"
-    
-    # Content Lines: Label fixed 10 chars, Value fixed 50 chars.
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Author" "$AUTHOR"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Hostname" "$MY_HOST"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "IP Addr" "$MY_IP"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "OS System" "$MY_OS"
     printf "${CYAN}║${RESET} ${YELLOW}%-10s${RESET} : ${WHITE}%-50s${RESET} ${CYAN}║${RESET}\n" "Specs" "${CPU_CORES} vCPU / ${RAM_TOTAL} RAM"
-    
-    # Bottom Border
     printf "${CYAN}╚═════════════════════════════════════════════════════════════════╝${RESET}\n"
     echo ""
 }
@@ -190,8 +174,17 @@ while true; do
                 if id "$NEW_USER" &>/dev/null; then
                     echo -e "     ${RED}User exists.${RESET}"
                 else
-                    adduser --gecos "" "$NEW_USER" >/dev/null 2>&1
+                    # 1. Buat user tanpa prompt password (agar tidak stuck)
+                    adduser --disabled-password --gecos "" "$NEW_USER" >/dev/null 2>&1
                     usermod -aG sudo "$NEW_USER"
+                    
+                    # 2. Pesan JELAS sebelum input password
+                    echo -e "     ${YELLOW}Set Password for $NEW_USER:${RESET}"
+                    echo -e "     ${DIM}(NOTE: Ketikan Anda akan TERSEMBUNYI / Invisible. Cukup ketik & Enter)${RESET}"
+                    
+                    # 3. Panggil passwd secara interaktif
+                    passwd "$NEW_USER"
+                    
                     mkdir -p /home/$NEW_USER/.ssh
                     echo -e "     ${DIM}Paste PubKey (Enter to skip):${RESET}"
                     read -r PUB_KEY
@@ -201,7 +194,7 @@ while true; do
                         chmod 600 /home/$NEW_USER/.ssh/authorized_keys
                         chown -R $NEW_USER:$NEW_USER /home/$NEW_USER/.ssh
                     fi
-                    echo -e "     ${GREEN}Created.${RESET}"
+                    echo -e "     ${GREEN}Created & Sudo Access Granted.${RESET}"
                 fi
                 ;;
             4)
